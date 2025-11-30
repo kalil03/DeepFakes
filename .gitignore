@@ -1,0 +1,12 @@
+
+venv_ia/
+
+__pycache__/
+*.py[cod]
+
+archive/
+
+*.pkl
+
+.DS_Store
+Thumbs.db

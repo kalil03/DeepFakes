@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepFake Detector | AI Analysis</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="background-blobs">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <main class="container">
+        <header class="app-header">
+            <div class="logo">
+                <i class="fa-solid fa-fingerprint"></i>
+                <span>Veritas AI</span>
+            </div>
+            <h1>DeepFake Detector</h1>
+            <p>Advanced Neural Network Analysis for Image Authenticity</p>
+        </header>
+
+        <div class="glass-card upload-section" id="drop-zone">
+            <div class="upload-content">
+                <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                <h3>Arraste sua imagem aqui</h3>
+                <p>ou clique para selecionar</p>
+                <input type="file" id="file-input" accept="image/*" hidden>
+                <button class="btn-primary" onclick="document.getElementById('file-input').click()">
+                    Selecionar Arquivo
+                </button>
+            </div>
+            <div class="preview-container" id="preview-container" style="display: none;">
+                <img id="image-preview" src="" alt="Preview">
+                <button class="btn-icon remove-btn" id="remove-btn" title="Remover imagem">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="action-section">
+            <button id="analyze-btn" class="btn-analyze" disabled>
+                <span class="btn-text">Analisar Imagem</span>
+                <span class="loader" style="display: none;"></span>
+            </button>
+        </div>
+
+        <div class="result-section" id="result-section" style="display: none;">
+            <div class="glass-card result-card">
+                <div class="result-header">
+                    <h2>Resultado da Análise</h2>
+                    <div class="badge" id="result-badge">Analisando...</div>
+                </div>
+                
+                <div class="confidence-meter">
+                    <div class="meter-label">
+                        <span>Confiança da IA</span>
+                        <span id="confidence-value">0%</span>
+                    </div>
+                    <div class="meter-bar-bg">
+                        <div class="meter-bar-fill" id="confidence-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div class="details-grid">
+                    <div class="detail-item">
+                        <span class="label">Modelo</span>
+                        <span class="value">DenseNet121 + Stacking</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="label">Tempo de Processamento</span>
+                        <span class="value" id="process-time">-- ms</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>Powered by PyTorch & Scikit-Learn</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
