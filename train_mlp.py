@@ -13,6 +13,7 @@ from torch.utils.data import DataLoader
 from torchvision.models import densenet121, DenseNet121_Weights
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -20,7 +21,7 @@ import joblib
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-BASE_DIR  = '/home/kalilzera/Documentos/DeepFakes/archive/real_vs_fake/real-vs-fake'
+BASE_DIR  = '/home/kalilzera/Documentos/DeepFakes/multi_dataset'
 TRAIN_DIR = os.path.join(BASE_DIR, 'train')
 TEST_DIR  = os.path.join(BASE_DIR, 'test')
 CACHE_DIR = 'features_cache'
@@ -96,8 +97,8 @@ def extract_features(folder, device, split_name, augment=False):
 def main():
     print(f"device: {DEVICE}")
 
-    X_train, y_train, classes = extract_features(TRAIN_DIR, DEVICE, 'train', augment=True)
-    X_test,  y_test,  _       = extract_features(TEST_DIR,  DEVICE, 'test')
+    X_train, y_train, classes = extract_features(TRAIN_DIR, DEVICE, 'train_multi', augment=True)
+    X_test,  y_test,  _       = extract_features(TEST_DIR,  DEVICE, 'test_multi')
 
     scaler    = StandardScaler()
     X_train_s = scaler.fit_transform(X_train)

@@ -4,13 +4,18 @@
 
 > **[🔗 Testar a Demo ao Vivo](https://huggingface.co/spaces/kalilzera/DeepFakes)** — Faça upload de uma imagem direto no navegador e descubra se ela foi gerada por IA (e por qual modelo).
 
-Este projeto é um classificador robusto focado em **Atribuição de Fonte**. Diferente de detectores binários tradicionais ("Real ou Fake"), ele utiliza **Deep Learning** para identificar a "impressão digital" matemática de 5 categorias diferentes de autores de imagem, alcançando uma **acurácia de 96.78%**:
+Este projeto é um classificador robusto focado em **Atribuição de Fonte**. Diferente de detectores binários tradicionais ("Real ou Fake"), ele utiliza **Deep Learning** para identificar a "impressão digital" matemática de 5 categorias diferentes de autores de imagem. **Ele não diz apenas que é Fake, ele diz QUAL inteligência artificial gerou a imagem**, alcançando uma **acurácia de 96.78%**:
 
 - 👤 **Humano (Real)** (Fotos não processadas)
 - 🤖 **Deepfake Clássico (GANs)** (StyleGAN, Face Swapping)
 - 🎨 **DALL-E 3** (Integração ChatGPT)
 - 🌌 **Midjourney v6**
 - 🖌️ **Stable Diffusion** (SDXL, SD3, SD 2.1)
+
+<div align="center">
+  <img src="confusion_matrix_densenet.png" alt="Confusion Matrix Multi-Class" width="600">
+  <p><em>Matriz de Confusão mostrando a alta precisão do modelo em separar as 5 classes.</em></p>
+</div>
 
 ## Arquitetura Híbrida
 
