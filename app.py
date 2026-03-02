@@ -71,11 +71,22 @@ def predict():
         prediction    = mlp_model.predict(features_final)[0]
         probabilities = mlp_model.predict_proba(features_final)[0]
 
+        class_map = {
+            '0': 'Humano (Real)',
+            '1': 'Deepfake (GAN)',
+            '2': 'DALL-E 3 (ChatGPT)',
+            '3': 'Midjourney v6',
+            '4': 'Stable Diffusion'
+        }
+
+        classes_str = [class_map.get(str(c), str(c)) for c in mlp_model.classes_]
+        prediction_str = class_map.get(str(prediction), str(prediction))
+
         return jsonify({
-            'prediction':   str(prediction),
+            'prediction':   prediction_str,
             'confidence':   float(max(probabilities)),
             'probabilities': probabilities.tolist(),
-            'classes':      mlp_model.classes_.tolist()
+            'classes':      classes_str
         })
 
     except Exception as e:
