@@ -13,8 +13,9 @@ Este projeto é um classificador robusto focado em **Atribuição de Fonte**. Di
 - 🖌️ **Stable Diffusion** (SDXL, SD3, SD 2.1)
 
 <div align="center">
-  <img src="confusion_matrix_densenet.png" alt="Confusion Matrix Multi-Class" width="600">
-  <p><em>Matriz de Confusão mostrando a alta precisão do modelo em separar as 5 classes.</em></p>
+  <img src="confusion_matrix_densenet.png" alt="Confusion Matrix Multi-Class" width="400">
+  <img src="comparison_plot_densenet.png" alt="Model Comparison" width="400">
+  <p><em>Matriz de Confusão para as 5 classes e Comparação de Desempenho dos Modelos Clássicos.</em></p>
 </div>
 
 ## Arquitetura Híbrida
