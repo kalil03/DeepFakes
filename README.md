@@ -1,8 +1,8 @@
 # DeepFake Detection with Hybrid Architecture
 
-[![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20Demo-blue)](https://huggingface.co/spaces/kalil03/DeepFake-Detector)
+[![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20Demo-blue)](https://huggingface.co/spaces/kalilzera/DeepFakes)
 
-> **[🔗 Testar a Demo ao Vivo](https://huggingface.co/spaces/kalil03/DeepFake-Detector)** — Faça upload de uma imagem direto no navegador, sem instalar nada.
+> **[🔗 Testar a Demo ao Vivo](https://huggingface.co/spaces/kalilzera/DeepFakes)** — Faça upload de uma imagem direto no navegador, sem instalar nada.
 
 Este projeto implementa um sistema robusto para detecção de DeepFakes utilizando uma abordagem híbrida que combina **Deep Learning** para extração de características e **Machine Learning Clássico** para a classificação final.
 
