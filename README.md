@@ -1,5 +1,9 @@
 # DeepFake Detection with Hybrid Architecture
 
+[![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20Demo-blue)](https://huggingface.co/spaces/kalil03/DeepFake-Detector)
+
+> **[🔗 Testar a Demo ao Vivo](https://huggingface.co/spaces/kalil03/DeepFake-Detector)** — Faça upload de uma imagem direto no navegador, sem instalar nada.
+
 Este projeto implementa um sistema robusto para detecção de DeepFakes utilizando uma abordagem híbrida que combina **Deep Learning** para extração de características e **Machine Learning Clássico** para a classificação final.
 
 <img src="confusion_matrix_densenet.png" alt="Confusion Matrix" width="600">
@@ -13,15 +17,27 @@ O sistema é composto por dois estágios principais:
     *   Removemos a camada de classificação original e utilizamos a saída da camada de *Global Average Pooling*.
     *   Isso gera um vetor de características rico e denso para cada imagem.
 
-2.  **Classificação (Stacking Ensemble)**:
-    *   As características extraídas passam por uma redução de dimensionalidade via **PCA** (Principal Component Analysis).
-    *   Um **Stacking Classifier** combina as previsões de múltiplos modelos fortes:
-        *   MLP (Multi-Layer Perceptron)
-        *   SVM (Support Vector Machine)
-        *   Random Forest
-    *   O meta-classificador (**Random Forest**) toma a decisão final baseada nas saídas desses modelos.
+2.  **Classificação (MLP)**:
+    *   As características extraídas são normalizadas com **StandardScaler**.
+    *   Um **MLP (Multi-Layer Perceptron)** com arquitetura `(512, 256, 128)`, *early stopping* e *adaptive learning rate* realiza a classificação final diretamente sobre as 1024 features.
 
+### Modelos Analisados
 
+Durante o desenvolvimento, avaliamos múltiplos classificadores sobre as features extraídas pela DenseNet121:
+
+| Modelo | Acurácia Teste | Observação |
+|---|---|---|
+| Decision Tree | 68.02% | Severo overfitting |
+| KNN (k=5) | 76.99% | Bom recall para fake, fraco para real |
+| SVM (RBF, subset 5k) | 89.18% | Limitado pelo subset de treino |
+| **MLP (256,128) + PCA=300** | **95.58%** | Boa baseline |
+| **MLP (512,256,128) + PCA=500** | **96.32%** | Melhoria com mais componentes |
+| **MLP (512,256,128) sem PCA** ✅ | **97.19%** | **Melhor resultado** |
+| Stacking Ensemble (20 modelos) | < MLP | Custoso e inferior ao MLP |
+
+O **MLP sem PCA** foi o grande vencedor: remover a redução dimensional preservou informação discriminativa que estava sendo descartada. Escolhido como modelo de produção pelo equilíbrio entre acurácia, tamanho e velocidade de inferência.
+
+<img src="comparison_plot_densenet.png" alt="Model Comparison" width="600">
 
 ## Como Rodar o Projeto
 
@@ -52,7 +68,7 @@ O sistema é composto por dois estágios principais:
 
 ### Usando a Interface Web
 
-O projeto conta com uma interface web simples em Flask para testar imagens em tempo real.
+O projeto conta com uma interface web em Flask para testar imagens em tempo real.
 
 1.  Inicie o servidor:
     ```bash
@@ -80,8 +96,9 @@ Para retreinar os modelos do zero, você precisará do dataset **140k Real and F
 *   `app.py`: Aplicação Flask para inferência web.
 *   `trabalho_deepfake.py`: Script completo de treinamento, validação e geração de gráficos.
 *   `requirements.txt`: Lista de dependências do projeto.
-*   `*.pkl`: Modelos serializados (Scaler, PCA, Stacking Model).
+*   `*.pkl`: Modelos serializados (Scaler, PCA, MLP).
 *   `templates/` & `static/`: Arquivos de frontend.
+*   `huggingface/`: Arquivos para deploy da demo no Hugging Face Spaces.
 
 ---
 Desenvolvido como trabalho prático de Inteligência Artificial.

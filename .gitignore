@@ -10,3 +10,8 @@ archive/
 
 .DS_Store
 Thumbs.db
+
+huggingface/
+
+features_cache/
+
