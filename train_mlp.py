@@ -100,8 +100,41 @@ def main():
     X_train, y_train, classes = extract_features(TRAIN_DIR, DEVICE, 'train_multi', augment=True)
     X_test,  y_test,  _       = extract_features(TEST_DIR,  DEVICE, 'test_multi')
 
+    print("\n[balancing classes] Oversampling minority classes to remove 'Real' bias...")
+    unique, counts = np.unique(y_train, return_counts=True)
+    max_count = np.max(counts)
+    
+    X_res, y_res = [], []
+    for c in unique:
+        mask = (y_train == c)
+        X_c = X_train[mask]
+        y_c = y_train[mask]
+        
+        if len(X_c) < max_count:
+            repeats = max_count // len(X_c)
+            rem = max_count % len(X_c)
+            X_res.append(np.repeat(X_c, repeats, axis=0))
+            y_res.append(np.repeat(y_c, repeats, axis=0))
+            if rem > 0:
+                indices = np.random.choice(len(X_c), rem, replace=False)
+                X_res.append(X_c[indices])
+                y_res.append(y_c[indices])
+        else:
+            X_res.append(X_c)
+            y_res.append(y_c)
+            
+    X_train_bal = np.vstack(X_res)
+    y_train_bal = np.concatenate(y_res)
+    
+    # Shuffle the balanced dataset
+    shuff_idx = np.random.permutation(len(X_train_bal))
+    X_train_bal = X_train_bal[shuff_idx]
+    y_train_bal = y_train_bal[shuff_idx]
+    
+    print(f"Dataset Balanced: from {len(X_train)} to {len(X_train_bal)} samples (max_count={max_count} per class)")
+
     scaler    = StandardScaler()
-    X_train_s = scaler.fit_transform(X_train)
+    X_train_s = scaler.fit_transform(X_train_bal)
     X_test_s  = scaler.transform(X_test)
 
     mlp = MLPClassifier(
@@ -119,7 +152,7 @@ def main():
         verbose=True
     )
     t0 = time.time()
-    mlp.fit(X_train_s, y_train)
+    mlp.fit(X_train_s, y_train_bal)
     print(f"trained in {time.time()-t0:.1f}s — {mlp.n_iter_} epochs")
 
     y_pred = mlp.predict(X_test_s)

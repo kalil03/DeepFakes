@@ -13,7 +13,7 @@ from flask import Flask, request, jsonify, render_template
 
 IMG_SIZE = 224
 DEVICE   = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-app      = Flask(__name__)
+app = Flask(__name__, static_folder='frontend/dist', static_url_path='/')
 
 
 class DenseNetExtractor(nn.Module):
@@ -48,7 +48,7 @@ except Exception as e:
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return app.send_static_file('index.html')
 
 
 @app.route('/predict', methods=['POST'])
