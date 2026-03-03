@@ -72,6 +72,7 @@ const Index = () => {
           dalle3: getProb("DALL-E 3 (ChatGPT)"),
           midjourneyV6: getProb("Midjourney v6"),
           stableDiffusion: getProb("Stable Diffusion"),
+          googleGemini: getProb("Google Gemini"),
         },
       };
 

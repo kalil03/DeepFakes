@@ -9,6 +9,7 @@ export interface AnalysisResult {
     dalle3: number;
     midjourneyV6: number;
     stableDiffusion: number;
+    googleGemini: number;
   };
 }
 
@@ -22,6 +23,7 @@ const categoryLabels: { key: keyof AnalysisResult["categories"]; label: string; 
   { key: "dalle3", label: "DALL·E 3", tag: "DALL-E" },
   { key: "midjourneyV6", label: "Midjourney v6", tag: "MJ" },
   { key: "stableDiffusion", label: "Stable Diffusion", tag: "SD" },
+  { key: "googleGemini", label: "Google Gemini", tag: "GEMINI" },
 ];
 
 const ResultCard = ({ result }: ResultCardProps) => {

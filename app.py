@@ -76,7 +76,8 @@ def predict():
             '1': 'Deepfake (GAN)',
             '2': 'DALL-E 3 (ChatGPT)',
             '3': 'Midjourney v6',
-            '4': 'Stable Diffusion'
+            '4': 'Stable Diffusion',
+            '5': 'Google Gemini'
         }
 
         classes_str = [class_map.get(str(c), str(c)) for c in mlp_model.classes_]
