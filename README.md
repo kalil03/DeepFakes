@@ -4,24 +4,25 @@
 
 > **[🔗 Testar a Demo ao Vivo](https://huggingface.co/spaces/kalilzera/DeepFakes)** — Faça upload de uma imagem direto no navegador e descubra se ela foi gerada por IA (e por qual modelo).
 
-Este projeto é um classificador robusto focado em **Atribuição de Fonte**. Diferente de detectores binários tradicionais ("Real ou Fake"), ele utiliza **Deep Learning** para identificar a "impressão digital" matemática de 5 categorias diferentes de autores de imagem. **Ele não diz apenas que é Fake, ele diz QUAL inteligência artificial gerou a imagem**, alcançando uma **acurácia de 96.78%**:
+Este projeto é um classificador robusto focado em **Atribuição de Fonte**. Diferente de detectores binários tradicionais ("Real ou Fake"), ele utiliza **Deep Learning** para identificar a "impressão digital" matemática de 6 categorias diferentes de autores de imagem. **Ele não diz apenas que é Fake, ele diz QUAL inteligência artificial gerou a imagem**, alcançando uma **acurácia de 96.65%**:
 
 - 👤 **Humano (Real)** (Fotos não processadas)
 - 🤖 **Deepfake Clássico (GANs)** (StyleGAN, Face Swapping)
 - 🎨 **DALL-E 3** (Integração ChatGPT)
 - 🌌 **Midjourney v6**
 - 🖌️ **Stable Diffusion** (SDXL, SD3, SD 2.1)
+- ✨ **Google Gemini** (Imagen 2/3)
 
 <div align="center">
   <img src="confusion_matrix_densenet.png" alt="Confusion Matrix Multi-Class" width="400">
   <img src="comparison_plot_densenet.png" alt="Model Comparison" width="400">
-  <p><em>Matriz de Confusão para as 5 classes e Comparação de Desempenho dos Modelos Clássicos.</em></p>
+  <p><em>Matriz de Confusão para as 6 classes e Comparação de Desempenho dos Modelos Clássicos.</em></p>
 </div>
 
 ## Arquitetura Híbrida
 
 1.  **Extração de Características (`DenseNet121`)**: Extrai 1024 *features* ricas da imagem de entrada usando a arquitetura DenseNet (pré-treinada no ImageNet), analisando texturas e artefatos de compressão invisíveis ao olho humano.
-2.  **Classificador Multi-Classe (`MLP`)**: Um Perceptron Multicamadas (512 -> 256 -> 128) mapeia essas características diretamente para as 5 classes geradoras suportadas (Probabilidades).
+2.  **Classificador Multi-Classe (`MLP`)**: Um Perceptron Multicamadas (512 -> 256 -> 128) mapeia essas características diretamente para as 6 classes geradoras suportadas (Probabilidades).
 
 ## Como Rodar o Projeto
 
@@ -63,7 +64,8 @@ Se desejar retreinar o modelo a partir do zero ou adicionar fotos de novas IAs (
 ## Estrutura de Arquivos
 
 *   `app.py`: Backend Flask provendo a rota de inferência e cálculo matemático.
-*   `huggingface/app.py`: Aplicação Gradio e UI Avançada para publicação no Hub Público.
+*   `frontend/`: Interface Frontend moderna em React (Lovable).
+*   `huggingface/`: Configuração do contêiner Docker rodando o Flask+React para o Hub Público.
 *   `train_mlp.py`: Script para treinar o classificador a partir de imagens.
 *   `requirements.txt`: Dependências do projeto.
 *   `*.pkl`: Pesos pré-treinados atuais e modelagem lógica *(disponíveis via LFS)*.
