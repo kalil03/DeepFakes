@@ -32,7 +32,7 @@ const ImageUpload = ({ image, imagePreview, onImageSelect, onImageRemove, isAnal
         <img
           src={imagePreview}
           alt="Uploaded"
-          className="w-full h-72 object-cover"
+          className="w-full h-72 object-contain"
         />
         {isAnalyzing && (
           <div className="absolute inset-0 bg-background/60 flex items-center justify-center">
