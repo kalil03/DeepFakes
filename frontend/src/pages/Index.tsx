@@ -3,7 +3,6 @@ import Header from "@/components/Header";
 import ImageUpload from "@/components/ImageUpload";
 import AnalyzeButton from "@/components/AnalyzeButton";
 import ResultCard, { type AnalysisResult } from "@/components/ResultCard";
-import { Client } from "@gradio/client";
 import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
