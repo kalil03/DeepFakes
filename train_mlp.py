@@ -14,7 +14,8 @@ from torchvision.models import densenet121, DenseNet121_Weights
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
+from sklearn.metrics import classification_report, accuracy_score, confusion_matrix, log_loss
+import copy
 import matplotlib.pyplot as plt
 import seaborn as sns
 import joblib
@@ -97,8 +98,13 @@ def extract_features(folder, device, split_name, augment=False):
 def main():
     print(f"device: {DEVICE}")
 
-    X_train, y_train, classes = extract_features(TRAIN_DIR, DEVICE, 'train_multi', augment=True)
+    X_train_full, y_train_full, classes = extract_features(TRAIN_DIR, DEVICE, 'train_multi', augment=True)
     X_test,  y_test,  _       = extract_features(TEST_DIR,  DEVICE, 'test_multi')
+
+    print("\n[splitting validation before balancing]...")
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_full, y_train_full, test_size=0.1, stratify=y_train_full, random_state=42
+    )
 
     print("\n[balancing classes] Oversampling minority classes to remove 'Real' bias...")
     unique, counts = np.unique(y_train, return_counts=True)
@@ -131,10 +137,11 @@ def main():
     X_train_bal = X_train_bal[shuff_idx]
     y_train_bal = y_train_bal[shuff_idx]
     
-    print(f"Dataset Balanced: from {len(X_train)} to {len(X_train_bal)} samples (max_count={max_count} per class)")
+    print(f"Dataset Balanced: from {len(X_train)} clean to {len(X_train_bal)} balanced samples")
 
     scaler    = StandardScaler()
     X_train_s = scaler.fit_transform(X_train_bal)
+    X_val_s   = scaler.transform(X_val)
     X_test_s  = scaler.transform(X_test)
 
     mlp = MLPClassifier(
@@ -143,17 +150,49 @@ def main():
         solver='adam',
         learning_rate='adaptive',
         learning_rate_init=1e-3,
-        max_iter=500,
-        early_stopping=True,
-        validation_fraction=0.1,
-        n_iter_no_change=25,
-        tol=1e-5,
-        random_state=42,
-        verbose=True
+        max_iter=1,
+        warm_start=True,
+        random_state=42
     )
+    
     t0 = time.time()
-    mlp.fit(X_train_s, y_train_bal)
-    print(f"trained in {time.time()-t0:.1f}s — {mlp.n_iter_} epochs")
+    best_loss = float('inf')
+    best_weights = None
+    best_intercepts = None
+    patience = 25
+    no_improve = 0
+    max_epochs = 500
+    
+    print("\nTraining MLP with manual early stopping (clean validation data)...")
+    import warnings
+    from sklearn.exceptions import ConvergenceWarning
+    
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=ConvergenceWarning)
+        for epoch in range(max_epochs):
+            mlp.fit(X_train_s, y_train_bal)
+            
+            val_probs = mlp.predict_proba(X_val_s)
+            val_loss = log_loss(y_val, val_probs)
+            
+            if val_loss < best_loss - 1e-5:
+                best_loss = val_loss
+                no_improve = 0
+                best_weights = copy.deepcopy(mlp.coefs_)
+                best_intercepts = copy.deepcopy(mlp.intercepts_)
+            else:
+                no_improve += 1
+                
+            if epoch % 10 == 0:
+                print(f"  Epoch {epoch:3d} | Val Loss: {val_loss:.4f} | No improve: {no_improve}/{patience}")
+                
+            if no_improve >= patience:
+                print(f"\nEarly stopping at epoch {epoch}. Restoring best weights.")
+                mlp.coefs_ = best_weights
+                mlp.intercepts_ = best_intercepts
+                break
+                
+    print(f"trained in {time.time()-t0:.1f}s")
 
     y_pred = mlp.predict(X_test_s)
     acc    = accuracy_score(y_test, y_pred)

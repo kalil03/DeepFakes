@@ -4,9 +4,8 @@ os.environ["ROCM_PATH"] = "/opt/rocm"
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.transforms as transforms
 from torchvision.models import densenet121, DenseNet121_Weights
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 import numpy as np
 import joblib
 from flask import Flask, request, jsonify, render_template
@@ -59,7 +58,11 @@ def predict():
         return jsonify({'error': 'no file provided'}), 400
 
     try:
-        image      = Image.open(request.files['file'].stream).convert('RGB')
+        try:
+            image      = Image.open(request.files['file'].stream).convert('RGB')
+        except UnidentifiedImageError:
+            return jsonify({'error': 'Invalid image format or corrupted file'}), 400
+            
         img_tensor = transform(image).unsqueeze(0).to(DEVICE)
 
         with torch.no_grad():
