@@ -8,6 +8,7 @@ from torchvision.models import densenet121, DenseNet121_Weights
 from PIL import Image, UnidentifiedImageError
 import numpy as np
 import joblib
+import torchvision.transforms as transforms
 from flask import Flask, request, jsonify, render_template
 
 IMG_SIZE = 224
