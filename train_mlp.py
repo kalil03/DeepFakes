@@ -1,35 +1,44 @@
 import os
+from pathlib import Path
+import time
+from typing import List, Tuple
+
 os.environ["HSA_OVERRIDE_GFX_VERSION"] = "10.3.0"
 os.environ["ROCM_PATH"] = "/opt/rocm"
 
-import time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as transforms
-from torchvision.datasets import ImageFolder
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 from torchvision.models import densenet121, DenseNet121_Weights
-from sklearn.preprocessing import StandardScaler
+
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.neural_network import MLPClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix, log_loss
+from sklearn.metrics import (
+    classification_report,
+    accuracy_score,
+    confusion_matrix,
+    log_loss,
+)
 import copy
 import matplotlib.pyplot as plt
 import seaborn as sns
 import joblib
-from PIL import ImageFile
+from tqdm.auto import tqdm
+from PIL import Image, ImageFile
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-BASE_DIR  = '/home/kalilzera/Documentos/DeepFakes/multi_dataset'
-TRAIN_DIR = os.path.join(BASE_DIR, 'train')
-TEST_DIR  = os.path.join(BASE_DIR, 'test')
-CACHE_DIR = 'features_cache'
-
+# ---------------------------------------------------------------------
+# Configurações gerais
+# ---------------------------------------------------------------------
+BASE_DIR = Path("multi_dataset")
+IMG_SIZE = 224
 BATCH_SIZE = 64
-IMG_SIZE   = 224
-DEVICE     = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+RANDOM_SEED = 42
 
 
 class DenseNetExtractor(nn.Module):
@@ -45,136 +54,227 @@ class DenseNetExtractor(nn.Module):
         return torch.flatten(f, 1)
 
 
-def extract_features(folder, device, split_name, augment=False):
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    cache_X = os.path.join(CACHE_DIR, f'X_{split_name}.npy')
-    cache_y = os.path.join(CACHE_DIR, f'y_{split_name}.npy')
-    cache_c = os.path.join(CACHE_DIR, f'classes_{split_name}.npy')
+class PathsDataset(Dataset):
+    def __init__(self, paths: List[Path], labels: List[int], transform=None):
+        self.paths = paths
+        self.labels = labels
+        self.transform = transform
 
-    if os.path.exists(cache_X):
-        print(f"[cache] {split_name}")
-        X       = np.load(cache_X)
-        y       = np.load(cache_y)
-        classes = list(np.load(cache_c))
-        return X, y, classes
+    def __len__(self):
+        return len(self.paths)
 
-    print(f"\n[extract] {split_name} — {folder}")
-    ops = [transforms.Resize((IMG_SIZE, IMG_SIZE))]
-    if augment:
-        ops.append(transforms.RandomHorizontalFlip(0.5))
-    ops += [
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ]
-    dataset = ImageFolder(folder, transforms.Compose(ops))
-    loader  = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=4)
-    model   = DenseNetExtractor().to(device)
+    def __getitem__(self, idx):
+        path = self.paths[idx]
+        label = self.labels[idx]
+        img = Image.open(path).convert("RGB")
+        if self.transform is not None:
+            img = self.transform(img)
+        return img, label
+
+
+def build_label_encoder(slugs: List[str]) -> LabelEncoder:
+    le = LabelEncoder()
+    le.fit(sorted(slugs))
+    return le
+
+
+def collect_split(
+    split: str,
+    label_encoder: LabelEncoder,
+    img_exts=(".jpg", ".jpeg", ".png", ".webp"),
+) -> Tuple[List[Path], List[int]]:
+    paths: List[Path] = []
+    labels: List[int] = []
+
+    for slug in sorted(d.name for d in BASE_DIR.iterdir() if d.is_dir()):
+        split_dir = BASE_DIR / slug / split
+        if not split_dir.exists():
+            continue
+        for p in split_dir.rglob("*"):
+            if p.is_file() and p.suffix.lower() in img_exts:
+                paths.append(p)
+                label = int(label_encoder.transform([slug])[0])
+                labels.append(label)
+
+    return paths, labels
+
+
+def get_transforms():
+    # Apenas train recebe augmentação pesada
+    train_tf = transforms.Compose(
+        [
+            transforms.Resize((IMG_SIZE, IMG_SIZE)),
+            transforms.RandomHorizontalFlip(0.5),
+            transforms.RandomRotation(15),
+            transforms.ColorJitter(
+                brightness=0.3,
+                contrast=0.3,
+                saturation=0.2,
+            ),
+            transforms.RandomApply(
+                [transforms.GaussianBlur(kernel_size=3)],
+                p=0.3,
+            ),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ]
+    )
+
+    eval_tf = transforms.Compose(
+        [
+            transforms.Resize((IMG_SIZE, IMG_SIZE)),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+            ),
+        ]
+    )
+    return train_tf, eval_tf
+
+
+def extract_features(
+    paths: List[Path],
+    labels: List[int],
+    transform,
+    split_name: str,
+) -> Tuple[np.ndarray, np.ndarray]:
+    if not paths:
+        raise RuntimeError(f"Nenhuma imagem encontrada para o split '{split_name}'.")
+
+    dataset = PathsDataset(paths, labels, transform=transform)
+    loader = DataLoader(
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=(DEVICE.type == "cuda"),
+    )
+
+    model = DenseNetExtractor().to(DEVICE)
     model.eval()
 
-    feats, labels = [], []
+    feats, labs = [], []
     start = time.time()
     with torch.no_grad():
-        for i, (imgs, labs) in enumerate(loader):
-            with torch.amp.autocast('cuda', enabled=(device.type == "cuda")):
-                f = model(imgs.to(device))
+        for imgs, ys in tqdm(loader, desc=f"Extraindo features [{split_name}]"):
+            imgs = imgs.to(DEVICE)
+            with torch.amp.autocast(
+                "cuda", enabled=(DEVICE.type == "cuda")
+            ):
+                f = model(imgs)
             feats.append(f.cpu().numpy())
-            labels.append(labs.numpy())
-            if device.type == "cuda":
+            labs.append(ys.numpy())
+            if DEVICE.type == "cuda":
                 torch.cuda.empty_cache()
-            if i % 50 == 0:
-                print(f"  {i * BATCH_SIZE} imgs")
 
-    X       = np.vstack(feats)
-    y       = np.concatenate(labels)
-    classes = dataset.classes
-    print(f"  done: {X.shape} in {time.time()-start:.1f}s")
-
-    np.save(cache_X, X)
-    np.save(cache_y, y)
-    np.save(cache_c, classes)
-    return X, y, classes
+    X = np.vstack(feats)
+    y = np.concatenate(labs)
+    print(f"  [{split_name}] done: {X.shape} em {time.time() - start:.1f}s")
+    return X, y
 
 
 def main():
+    np.random.seed(RANDOM_SEED)
+    torch.manual_seed(RANDOM_SEED)
+
+    if not BASE_DIR.exists():
+        raise RuntimeError(
+            f"Diretório '{BASE_DIR}' não encontrado. "
+            "Certifique-se de rodar antes `python build_multi_dataset.py`."
+        )
+
+    # Descobre as classes (slugs) a partir das pastas
+    slugs = sorted(d.name for d in BASE_DIR.iterdir() if d.is_dir())
+    if not slugs:
+        raise RuntimeError(f"Nenhuma classe encontrada em {BASE_DIR}.")
+
     print(f"device: {DEVICE}")
+    print(f"classes (slugs): {slugs}")
 
-    X_train_full, y_train_full, classes = extract_features(TRAIN_DIR, DEVICE, 'train_multi', augment=True)
-    X_test,  y_test,  _       = extract_features(TEST_DIR,  DEVICE, 'test_multi')
+    label_encoder = build_label_encoder(slugs)
 
-    print("\n[splitting validation before balancing]...")
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_full, y_train_full, test_size=0.1, stratify=y_train_full, random_state=42
-    )
+    # Carrega listas de paths/labels
+    print("\n[coleta] paths por split...")
+    train_paths, train_labels = collect_split("train", label_encoder)
+    val_paths, val_labels = collect_split("val", label_encoder)
+    test_paths, test_labels = collect_split("test", label_encoder)
 
-    print("\n[balancing classes] Oversampling minority classes to remove 'Real' bias...")
-    unique, counts = np.unique(y_train, return_counts=True)
-    max_count = np.max(counts)
-    
-    X_res, y_res = [], []
-    for c in unique:
-        mask = (y_train == c)
-        X_c = X_train[mask]
-        y_c = y_train[mask]
-        
-        if len(X_c) < max_count:
-            repeats = max_count // len(X_c)
-            rem = max_count % len(X_c)
-            X_res.append(np.repeat(X_c, repeats, axis=0))
-            y_res.append(np.repeat(y_c, repeats, axis=0))
-            if rem > 0:
-                indices = np.random.choice(len(X_c), rem, replace=False)
-                X_res.append(X_c[indices])
-                y_res.append(y_c[indices])
-        else:
-            X_res.append(X_c)
-            y_res.append(y_c)
-            
-    X_train_bal = np.vstack(X_res)
-    y_train_bal = np.concatenate(y_res)
-    
-    # Shuffle the balanced dataset
-    shuff_idx = np.random.permutation(len(X_train_bal))
-    X_train_bal = X_train_bal[shuff_idx]
-    y_train_bal = y_train_bal[shuff_idx]
-    
-    print(f"Dataset Balanced: from {len(X_train)} clean to {len(X_train_bal)} balanced samples")
+    print(f"  train: {len(train_paths)} imagens")
+    print(f"  val:   {len(val_paths)} imagens")
+    print(f"  test:  {len(test_paths)} imagens")
 
-    scaler    = StandardScaler()
-    X_train_s = scaler.fit_transform(X_train_bal)
-    X_val_s   = scaler.transform(X_val)
-    X_test_s  = scaler.transform(X_test)
+    train_tf, eval_tf = get_transforms()
 
+    # Pré-cálculo de features
+    print("\n[features] extraindo features DenseNet121...")
+    X_train, y_train = extract_features(train_paths, train_labels, train_tf, "train")
+    X_val, y_val = extract_features(val_paths, val_labels, eval_tf, "val")
+    X_test, y_test = extract_features(test_paths, test_labels, eval_tf, "test")
+
+    # Normalização (StandardScaler)
+    print("\n[scaler] ajustando StandardScaler com treino...")
+    scaler = StandardScaler()
+    X_train_s = scaler.fit_transform(X_train)
+    X_val_s = scaler.transform(X_val)
+    X_test_s = scaler.transform(X_test)
+
+    # Treino do MLP (scikit-learn)
     mlp = MLPClassifier(
         hidden_layer_sizes=(512, 256, 128),
-        activation='relu',
-        solver='adam',
-        learning_rate='adaptive',
+        activation="relu",
+        solver="adam",
+        learning_rate="adaptive",
         learning_rate_init=1e-3,
         max_iter=1,
         warm_start=True,
-        random_state=42
+        random_state=RANDOM_SEED,
     )
-    
-    t0 = time.time()
-    best_loss = float('inf')
+
+    best_loss = float("inf")
     best_weights = None
     best_intercepts = None
-    patience = 25
+    patience = 10
     no_improve = 0
     max_epochs = 500
-    
-    print("\nTraining MLP with manual early stopping (clean validation data)...")
-    import warnings
+
+    print("\n[treino] MLP com early stopping (val log-loss)...")
     from sklearn.exceptions import ConvergenceWarning
-    
+    import warnings
+
+    t0 = time.time()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=ConvergenceWarning)
-        for epoch in range(max_epochs):
-            mlp.fit(X_train_s, y_train_bal)
-            
+        epoch_iter = tqdm(range(max_epochs), desc="Treinando MLP")
+        for epoch in epoch_iter:
+            mlp.fit(X_train_s, y_train)
+
+            # Loss de treino (MLPClassifier expõe loss_ do último fit)
+            train_loss = getattr(mlp, "loss_", np.nan)
+
+            # Métricas de validação
             val_probs = mlp.predict_proba(X_val_s)
             val_loss = log_loss(y_val, val_probs)
-            
+            val_pred = np.argmax(val_probs, axis=1)
+            val_acc = accuracy_score(y_val, val_pred)
+
+            epoch_iter.set_postfix(
+                {
+                    "train_loss": f"{train_loss:.4f}",
+                    "val_loss": f"{val_loss:.4f}",
+                    "val_acc": f"{val_acc:.4f}",
+                    "no_improve": f"{no_improve}/{patience}",
+                }
+            )
+
+            print(
+                f"Epoch {epoch:03d} | train_loss={train_loss:.4f} "
+                f"| val_loss={val_loss:.4f} | val_acc={val_acc:.4f}"
+            )
+
             if val_loss < best_loss - 1e-5:
                 best_loss = val_loss
                 no_improve = 0
@@ -182,35 +282,65 @@ def main():
                 best_intercepts = copy.deepcopy(mlp.intercepts_)
             else:
                 no_improve += 1
-                
-            if epoch % 10 == 0:
-                print(f"  Epoch {epoch:3d} | Val Loss: {val_loss:.4f} | No improve: {no_improve}/{patience}")
-                
+
             if no_improve >= patience:
-                print(f"\nEarly stopping at epoch {epoch}. Restoring best weights.")
+                print(
+                    f"\n[early stopping] parada em epoch {epoch}. "
+                    "Restaurando melhores pesos (menor val_loss)."
+                )
                 mlp.coefs_ = best_weights
                 mlp.intercepts_ = best_intercepts
                 break
-                
-    print(f"trained in {time.time()-t0:.1f}s")
 
+    print(f"\n[treino] concluído em {time.time() - t0:.1f}s")
+
+    # Avaliação final no conjunto de teste
+    print("\n[avaliacao] conjunto de teste...")
     y_pred = mlp.predict(X_test_s)
-    acc    = accuracy_score(y_test, y_pred)
-    print(f"\ntest accuracy: {acc:.4%}")
-    print(classification_report(y_test, y_pred, target_names=classes, digits=4))
+    acc = accuracy_score(y_test, y_pred)
+    print(f"\nAcurácia geral (test): {acc:.4%}")
 
-    cm = confusion_matrix(y_test, y_pred, normalize='true')
+    class_names = list(label_encoder.classes_)
+    print("\nClassification report (test):")
+    print(
+        classification_report(
+            y_test,
+            y_pred,
+            target_names=class_names,
+            digits=4,
+        )
+    )
+
+    cm = confusion_matrix(y_test, y_pred)
+    # acurácia por classe = diag / total da classe
+    per_class_acc = cm.diagonal() / cm.sum(axis=1).clip(min=1)
+    print("\nAcurácia por classe (test):")
+    for name, a in zip(class_names, per_class_acc):
+        print(f"  {name:16s}: {a:.4%}")
+
+    # Matriz de confusão normalizada para visualização
+    cm_norm = confusion_matrix(y_test, y_pred, normalize="true")
     plt.figure(figsize=(8, 6))
-    sns.heatmap(cm, annot=True, fmt='.2%', cmap='Greens', xticklabels=classes, yticklabels=classes)
+    sns.heatmap(
+        cm_norm,
+        annot=True,
+        fmt=".2%",
+        cmap="Greens",
+        xticklabels=class_names,
+        yticklabels=class_names,
+    )
     plt.title(f"Confusion Matrix — MLP ({acc:.2%})")
     plt.tight_layout()
-    plt.savefig("confusion_matrix_densenet.png")
+    plt.savefig("confusion_matrix.png")
+    plt.close()
 
-    joblib.dump(scaler, 'scaler_densenet.pkl')
-    joblib.dump(None,   'pca_densenet.pkl')
-    joblib.dump(mlp,    'mlp_densenet.pkl')
-    print("saved: scaler_densenet.pkl, pca_densenet.pkl, mlp_densenet.pkl")
+    # Salvando artefatos
+    joblib.dump(scaler, "scaler.pkl")
+    joblib.dump(label_encoder, "label_encoder.pkl")
+    joblib.dump(mlp, "model_mlp.pkl")
+    print("\n[save] Artefatos salvos: model_mlp.pkl, scaler.pkl, label_encoder.pkl")
 
 
 if __name__ == "__main__":
     main()
+

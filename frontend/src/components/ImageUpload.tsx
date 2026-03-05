@@ -64,20 +64,23 @@ const ImageUpload = ({ image, imagePreview, onImageSelect, onImageRemove, isAnal
     >
       <label
         htmlFor="image-upload"
-        className="flex flex-col items-center justify-center w-full h-64 rounded-2xl border-2 border-dashed border-white/[0.1] glass glow-border cursor-pointer hover:glow-border-active transition-all duration-300 group"
+        className="flex flex-col items-center justify-center w-full h-60 rounded-lg border border-dashed border-[#1f1f1f] bg-[#101010] cursor-pointer transition-colors duration-150 group"
       >
-        <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+        <div className="w-12 h-12 rounded-md border border-[#1f1f1f] bg-[#141414] flex items-center justify-center mb-3">
           <Upload className="w-7 h-7 text-primary" />
         </div>
-        <p className="text-sm font-medium text-foreground mb-1">
-          Arraste uma imagem ou <span className="gradient-text font-semibold">clique para enviar</span>
+        <p className="text-xs sm:text-sm font-medium text-foreground mb-1">
+          Drag an image here or{" "}
+          <span className="text-primary font-semibold">click to select</span>
         </p>
-        <p className="text-xs text-muted-foreground font-mono">
-          PNG, JPG, WEBP — até 10MB
+        <p className="text-[11px] text-muted-foreground font-mono">
+          PNG, JPG, WEBP • up to 10MB
         </p>
-        <div className="flex items-center gap-1.5 mt-4 text-muted-foreground">
+        <div className="flex items-center gap-1.5 mt-3 text-muted-foreground">
           <ImageIcon className="w-3.5 h-3.5" />
-          <span className="text-[11px] font-mono">Formatos de imagem suportados</span>
+          <span className="text-[11px] font-mono">
+            Supported formats: jpg, png, webp
+          </span>
         </div>
       </label>
       <input

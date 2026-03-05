@@ -1,0 +1,10 @@
+datasets/
+multi_dataset/
+venv*/
+__pycache__/
+*.pyc
+node_modules/
+frontend/.next
+.env
+.git
+

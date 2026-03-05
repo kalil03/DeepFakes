@@ -2,7 +2,11 @@ import { useState, useCallback } from "react";
 import Header from "@/components/Header";
 import ImageUpload from "@/components/ImageUpload";
 import AnalyzeButton from "@/components/AnalyzeButton";
-import ResultCard, { type AnalysisResult } from "@/components/ResultCard";
+import ResultCard, {
+  type AnalysisResult,
+  type ClassProbability,
+  type SightengineResult,
+} from "@/components/ResultCard";
 import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
@@ -23,12 +27,21 @@ const Index = () => {
     setResult(null);
   }, []);
 
+  const handleReset = useCallback(() => {
+    setImage(null);
+    setImagePreview(null);
+    setResult(null);
+  }, []);
+
   const { toast } = useToast();
 
   const handleAnalyze = useCallback(async () => {
     if (!image) return;
     setIsAnalyzing(true);
     setResult(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     try {
       const formData = new FormData();
@@ -37,68 +50,94 @@ const Index = () => {
       const response = await fetch("/predict", {
         method: "POST",
         body: formData,
+        signal: controller.signal,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP error ${response.status}`);
+      clearTimeout(timeoutId);
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || data.error) {
+        throw new Error(
+          data.error || data.detail || `HTTP error ${response.status}`,
+        );
       }
 
-      const parsedData = await response.json();
+      const {
+        predicted_class,
+        confidence,
+        probabilities,
+        uncertain,
+        sightengine,
+      } = data as {
+        predicted_class: string;
+        confidence: number;
+        probabilities: Record<string, number>;
+        uncertain: boolean;
+        sightengine?: SightengineResult;
+      };
 
-      if (parsedData.error) {
-        throw new Error(parsedData.error);
+      const emojiMap: Record<string, string> = {
+        "Human (Real)": "👤",
+        "Deepfake (GAN)": "🤖",
+        "DALL-E 3": "🎨",
+        "Midjourney v6": "🌌",
+        "Stable Diffusion": "🖌️",
+        "Gemini / Imagen": "✨",
+      };
+
+      const classProbs: ClassProbability[] = Object.entries(probabilities).map(
+        ([name, prob]) => ({
+          name,
+          emoji: emojiMap[name] ?? "🧠",
+          probability: prob,
+        }),
+      );
+
+      // Sightengine agreement heuristic
+      let seWithAgreement: SightengineResult | undefined;
+      if (sightengine) {
+        const localIsAi = predicted_class !== "Human (Real)";
+        const seIsAi = sightengine.is_ai_generated || sightengine.is_deepfake;
+        const agreement =
+          seIsAi === localIsAi ? ("agree" as const) : ("disagree" as const);
+        seWithAgreement = { ...sightengine, agreement };
       }
-
-      const { prediction, confidence, probabilities, classes } = parsedData;
-
-      // Classes array mapping back to probabilies
-      const probMap: Record<string, number> = {};
-      classes.forEach((c: string, idx: number) => {
-        probMap[c] = probabilities[idx];
-      });
-
-      const getProb = (key: string) => (probMap[key] || 0) * 100;
-
-      const is_real = prediction === 'Humano (Real)';
 
       const finalResult: AnalysisResult = {
-        isReal: is_real,
-        confidence: confidence * 100,
-        categories: {
-          human: getProb("Humano (Real)"),
-          deepfakeGan: getProb("Deepfake (GAN)"),
-          dalle3: getProb("DALL-E 3 (ChatGPT)"),
-          midjourneyV6: getProb("Midjourney v6"),
-          stableDiffusion: getProb("Stable Diffusion"),
-          googleGemini: getProb("Google Gemini"),
-        },
+        predictedClass: predicted_class,
+        confidence,
+        uncertain,
+        probabilities: classProbs,
+        sightengine: seWithAgreement,
       };
 
       setResult(finalResult);
     } catch (error) {
       console.error("Inference Error:", error);
       toast({
-        title: "Erro de Análise",
-        description: "Falha ao conectar com a IA (Hugging Face Spaces).",
+        title: "Something went wrong",
+        description: "Something went wrong. Please try again.",
         variant: "destructive",
       });
     } finally {
       setIsAnalyzing(false);
+      clearTimeout(timeoutId);
     }
   }, [image, toast]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-background grid-bg">
+    <div className="min-h-screen flex flex-col bg-background">
       <Header />
 
-      <main className="flex-1 flex flex-col items-center justify-center px-4 py-12 gap-8">
-        <div className="text-center mb-2">
-          <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground mb-3">
-            Detecte <span className="gradient-text">DeepFakes</span> com Precisão
+      <main className="flex-1 flex flex-col items-center justify-center px-4 py-10 gap-8">
+        <div className="w-full max-w-xl text-left mb-2">
+          <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground mb-1">
+            Deepfake attribution analysis
           </h2>
-          <p className="text-sm text-muted-foreground max-w-md mx-auto">
-            Envie uma imagem para análise forense com inteligência artificial. Identifique manipulações e atribua a origem do conteúdo.
+          <p className="text-xs sm:text-sm text-muted-foreground max-w-xl">
+            Upload a face or AI-generated image to estimate whether it is human
+            or synthetic and which generator model best matches its signature.
           </p>
         </div>
 
@@ -116,7 +155,13 @@ const Index = () => {
           disabled={!image}
         />
 
-        {result && <ResultCard result={result} />}
+        {result && (
+          <ResultCard
+            result={result}
+            imagePreview={imagePreview}
+            onReset={handleReset}
+          />
+        )}
       </main>
 
       <footer className="py-4 text-center">

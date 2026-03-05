@@ -11,7 +11,7 @@ const AnalyzeButton = ({ onClick, isAnalyzing, disabled }: AnalyzeButtonProps) =
     <button
       onClick={onClick}
       disabled={disabled || isAnalyzing}
-      className="relative group px-8 py-3.5 rounded-xl font-semibold text-sm tracking-wide transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed gradient-primary text-primary-foreground hover:shadow-[0_0_30px_-5px_hsl(var(--glow-primary)/0.5)] active:scale-[0.98]"
+      className="relative group px-7 py-3 rounded-md font-medium text-xs sm:text-sm tracking-wide transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed bg-primary text-primary-foreground hover:bg-primary/90"
     >
       <span className="flex items-center gap-2.5">
         {isAnalyzing ? (

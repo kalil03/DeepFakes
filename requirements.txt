@@ -1,10 +1,16 @@
 flask
+flask-cors
 torch
 torchvision
 numpy
 scikit-learn
 matplotlib
 seaborn
-opencv-python
 Pillow
 joblib
+python-dotenv
+requests
+tqdm
+pandas
+huggingface_hub
+kaggle

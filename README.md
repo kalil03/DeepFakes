@@ -68,4 +68,14 @@ Se desejar retreinar o modelo a partir do zero ou adicionar fotos de novas IAs (
 *   `huggingface/`: Configuração do contêiner Docker rodando o Flask+React para o Hub Público.
 *   `train_mlp.py`: Script para treinar o classificador a partir de imagens.
 *   `requirements.txt`: Dependências do projeto.
-*   `*.pkl`: Pesos pré-treinados atuais e modelagem lógica *(disponíveis via LFS)*.
+*   `*.pkl`: Pesos pré-treinados atuais e modelagem lógica *(armazenados via Git LFS)*.
+
+> **Importante — Git LFS para pesos (.pkl)**
+>
+> Os arquivos de pesos do modelo (`model_mlp.pkl`, `scaler.pkl`, `label_encoder.pkl`) são armazenados via **Git LFS**.  
+> Antes de clonar/puxar o repositório completo, certifique-se de:
+>
+> ```bash
+> git lfs install
+> git lfs pull
+> ```
