@@ -1,79 +1,181 @@
-# DeepFake & AI Image Detector
+## DeepTrace — Face Deepfake Detector
 
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Live%20Demo-blue)](https://huggingface.co/spaces/kalilzera/DeepFakes)
 
-> **[🔗 Testar a Demo ao Vivo](https://huggingface.co/spaces/kalilzera/DeepFakes)** — Faça upload de uma imagem direto no navegador e descubra se ela foi gerada por IA (e por qual modelo).
+> **[🔗 Demo no Hugging Face](https://huggingface.co/spaces/kalilzera/DeepFakes)**  
+> *DeepTrace — Forensic deepfake detection for human faces.*
 
-Este projeto é um classificador robusto focado em **Atribuição de Fonte**. Diferente de detectores binários tradicionais ("Real ou Fake"), ele utiliza **Deep Learning** para identificar a "impressão digital" matemática de 6 categorias diferentes de autores de imagem. **Ele não diz apenas que é Fake, ele diz QUAL inteligência artificial gerou a imagem**, alcançando uma **acurácia de 96.65%**:
+This project implements a **deepfake detector focused on human faces** (cropped faces, 224×224), with two classes:
 
-- 👤 **Humano (Real)** (Fotos não processadas)
-- 🤖 **Deepfake Clássico (GANs)** (StyleGAN, Face Swapping)
-- 🎨 **DALL-E 3** (Integração ChatGPT)
-- 🌌 **Midjourney v6**
-- 🖌️ **Stable Diffusion** (SDXL, SD3, SD 2.1)
-- ✨ **Google Gemini** (Imagen 2/3)
+- 👤 `human_real` → **Human (Real)**
+- 🤖 `deepfake_gan` → **Deepfake (GAN)**
 
-<div align="center">
-  <img src="confusion_matrix_densenet.png" alt="Confusion Matrix Multi-Class" width="400">
-  <img src="comparison_plot_densenet.png" alt="Model Comparison" width="400">
-  <p><em>Matriz de Confusão para as 6 classes e Comparação de Desempenho dos Modelos Clássicos.</em></p>
-</div>
+Internally it uses:
 
-## Arquitetura Híbrida
+- **DenseNet121 (ImageNet)** as a feature extractor (1024 dimensions).
+- **MLPClassifier (scikit‑learn)** 1024 → 512 → 256 → 128 → 2 classes.
 
-1.  **Extração de Características (`DenseNet121`)**: Extrai 1024 *features* ricas da imagem de entrada usando a arquitetura DenseNet (pré-treinada no ImageNet), analisando texturas e artefatos de compressão invisíveis ao olho humano.
-2.  **Classificador Multi-Classe (`MLP`)**: Um Perceptron Multicamadas (512 -> 256 -> 128) mapeia essas características diretamente para as 6 classes geradoras suportadas (Probabilidades).
+The goal is **≥ 98% accuracy** on validation, distinguishing real faces from GAN-generated/manipulated faces (StyleGAN, OpenForensics).
 
-## Como Rodar o Projeto
+---
 
-### 1. Instalação Local
+## How to run locally
 
-1.  Clone o repositório e acesse a pasta:
-    ```bash
-    git clone https://github.com/kalil03/DeepFakes.git
-    cd DeepFakes
-    ```
+### 1. Clone and install dependencies
 
-2.  Crie um ambiente virtual e instale as dependências:
-    ```bash
-    python3 -m venv venv_ia
-    source venv_ia/bin/activate  # ou venv\Scripts\activate no Windows
-    pip install -r requirements.txt
-    ```
+```bash
+git clone https://github.com/kalil03/DeepFakes.git
+cd DeepFakes
 
-### 2. Interface de Demonstração (Flask)
+python3 -m venv venv_ia
+source venv_ia/bin/activate  # or venv\Scripts\activate on Windows
 
-Para subir um servidor web simples de inferência em sua própria máquina:
+python3 -m pip install -r requirements.txt
+```
+
+For the frontend (React):
+
+```bash
+cd frontend
+npm install
+cd ..
+```
+
+### 2. Configure Kaggle (face datasets)
+
+The pipeline uses two public Kaggle datasets:
+
+- [140k Real and Fake Faces](https://www.kaggle.com/datasets/xhlulu/140k-real-and-fake-faces) (StyleGAN)
+- [Deepfake and Real Images](https://www.kaggle.com/datasets/manjilkarki/deepfake-and-real-images) (OpenForensics)
+
+1. Install the Kaggle CLI:
+
+```bash
+pip install kaggle
+```
+
+2. Create the file `~/.kaggle/kaggle.json`:
+
+```json
+{
+  "username": "YOUR_USERNAME_HERE",
+  "key": "YOUR_KAGGLE_API_KEY_HERE"
+}
+```
+
+3. Set permissions:
+
+```bash
+chmod 600 ~/.kaggle/kaggle.json
+```
+
+### 3. Download the raw datasets
+
+```bash
+python3 download_datasets.py
+```
+
+This downloads and extracts:
+
+- `datasets/raw/kaggle/140k-real-and-fake-faces/...`
+- `datasets/raw/kaggle/deepfake-and-real-images/...`
+
+### 4. Build the balanced 2-class dataset
+
+```bash
+python3 build_multi_dataset.py
+```
+
+This script:
+
+- Wipes any existing `multi_dataset/`.
+- Collects real and fake images from the downloaded sources.
+- Deduplicates by filename across sources.
+- Balances classes to the same size.
+- Splits 80/10/10:
+
+```text
+multi_dataset/
+  human_real/{train,val,test}/
+  deepfake_gan/{train,val,test}/
+```
+
+### 5. Train the model (DenseNet + MLP)
+
+#### NVIDIA (or CPU)
+
+```bash
+python3 train_mlp.py
+```
+
+#### AMD (ROCm)
+
+```bash
+USE_ROCM=1 python3 train_mlp.py
+```
+
+The script:
+
+- Extracts DenseNet121 features from `multi_dataset/{train,val,test}`.
+- Fits a `StandardScaler`.
+- Trains a `MLPClassifier` with early stopping (patience=10).
+- Prints accuracy and classification report on the test set.
+- Generates `confusion_matrix.png`.
+- Saves:
+
+```text
+model_mlp.pkl
+scaler.pkl
+label_encoder.pkl
+```
+
+### 6. Build the frontend
+
+```bash
+cd frontend
+npm run build
+cd ..
+```
+
+This generates `frontend/dist/`, served by Flask.
+
+### 7. Start the Flask API + UI
+
+With the virtual environment active and trained `.pkl` files:
 
 ```bash
 python3 app.py
 ```
-Acesse **http://localhost:5000** no seu navegador, faça o upload de uma foto e veja a classificação.
 
-### 3. Treinamento Local (Opcional)
+The API runs at `http://localhost:5000`.  
+Open in your browser and:
 
-Se desejar retreinar o modelo a partir do zero ou adicionar fotos de novas IAs (ex: Gemini):
+1. Upload a **face/portrait image**.
+2. Click **Analyze**.
+3. See the result:
+   - 👤 **Human (Real)** → "No manipulation detected."
+   - 🤖 **Deepfake (GAN)** → "AI generation or manipulation detected."
+   - Confidence bars for both classes.
+   - Uncertainty banner if confidence `< 60%`.
 
-1.  **Datasets**: O arquivo `build_multi_dataset.py` organiza arquivos provindos dos datasets [140k Real and Fake Faces](https://www.kaggle.com/datasets/xhlulu/140k-real-and-fake-faces) e [Defactify (arXiv:2601.00553v1)](https://arxiv.org/html/2601.00553v1).
-2.  Rode a extração e treinamento do MLP:
-    ```bash
-    # (Para GPUs AMD. No caso de Nvidia, basta 'python3 train_mlp.py')
-    HSA_OVERRIDE_GFX_VERSION=10.3.0 python3 train_mlp.py
-    ```
+---
 
-## Estrutura de Arquivos
+## File Structure
 
-*   `app.py`: Backend Flask provendo a rota de inferência e cálculo matemático.
-*   `frontend/`: Interface Frontend moderna em React (Lovable).
-*   `huggingface/`: Configuração do contêiner Docker rodando o Flask+React para o Hub Público.
-*   `train_mlp.py`: Script para treinar o classificador a partir de imagens.
-*   `requirements.txt`: Dependências do projeto.
-*   `*.pkl`: Pesos pré-treinados atuais e modelagem lógica *(armazenados via Git LFS)*.
+- `model.py` — Shared DenseNetExtractor, transforms, and constants.
+- `app.py` — Backend Flask (`/health`, `/predict`) + serves `frontend/dist`.
+- `frontend/` — UI in React + TypeScript (Vite + Tailwind).
+- `download_datasets.py` — Downloads Kaggle datasets (StyleGAN + OpenForensics).
+- `build_multi_dataset.py` — Builds `multi_dataset/` balanced (2 classes).
+- `train_mlp.py` — Extracts DenseNet121 features, trains MLP, saves `.pkl`.
+- `sightengine.py` — Optional Sightengine API cross-check.
+- `huggingface/` — Dockerfile and metadata for Hugging Face Spaces deploy.
+- `requirements.txt` — Python dependencies.
 
-> **Importante — Git LFS para pesos (.pkl)**
+> **Git LFS — model weights**
 >
-> Os arquivos de pesos do modelo (`model_mlp.pkl`, `scaler.pkl`, `label_encoder.pkl`) são armazenados via **Git LFS**.  
-> Antes de clonar/puxar o repositório completo, certifique-se de:
+> The weight files (`model_mlp.pkl`, `scaler.pkl`, `label_encoder.pkl`) are stored via **Git LFS**.  
+> Before pulling weights from a remote LFS repo:
 >
 > ```bash
 > git lfs install

@@ -1,9 +1,10 @@
 import os
 from io import BytesIO
-from concurrent.futures import ThreadPoolExecutor
 
-os.environ["HSA_OVERRIDE_GFX_VERSION"] = "10.3.0"
-os.environ["ROCM_PATH"] = "/opt/rocm"
+# ROCm environment (only set when actually using AMD GPU locally)
+if os.environ.get("USE_ROCM", "0") == "1":
+    os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "10.3.0")
+    os.environ.setdefault("ROCM_PATH", "/opt/rocm")
 
 from dotenv import load_dotenv
 
@@ -12,56 +13,32 @@ load_dotenv()
 import sys
 from pathlib import Path
 
-# Garantir que dependências instaladas em ./vendor estejam no PYTHONPATH
+# Ensure vendored dependencies are on PYTHONPATH (local/deploy fallback)
 VENDOR_DIR = Path(__file__).parent / "vendor"
 if VENDOR_DIR.exists():
     sys.path.insert(0, str(VENDOR_DIR))
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torchvision.models import densenet121, DenseNet121_Weights
-from PIL import Image, UnidentifiedImageError
 import numpy as np
 import joblib
-import torchvision.transforms as transforms
+from PIL import Image, UnidentifiedImageError
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-from sightengine import check_image as se_check_image, is_configured as se_is_configured
+from model import DenseNetExtractor, eval_transform, DEVICE
 
-IMG_SIZE = 224
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Optional Sightengine integration
+try:
+    import sightengine as se_module
+except ImportError:
+    se_module = None
 
+# ── Flask app ────────────────────────────────────────────────────────
 app = Flask(__name__, static_folder="frontend/dist", static_url_path="/")
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB upload limit
 CORS(app)
 
-
-class DenseNetExtractor(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.densenet = densenet121(weights=DenseNet121_Weights.IMAGENET1K_V1)
-        self.features = self.densenet.features
-
-    def forward(self, x):
-        f = self.features(x)
-        f = F.relu(f, inplace=True)
-        f = F.adaptive_avg_pool2d(f, (1, 1))
-        return torch.flatten(f, 1)
-
-
-transform = transforms.Compose(
-    [
-        transforms.Resize((IMG_SIZE, IMG_SIZE)),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=[0.485, 0.456, 0.406],
-            std=[0.229, 0.224, 0.225],
-        ),
-    ]
-)
-
-
+# ── Model loading ────────────────────────────────────────────────────
 feature_extractor = None
 scaler = None
 label_encoder = None
@@ -78,10 +55,10 @@ def _load_models():
         label_encoder = joblib.load("label_encoder.pkl")
         mlp_model = joblib.load("model_mlp.pkl")
         model_load_error = None
-        print("[models] Modelos carregados com sucesso.", flush=True)
+        print("[models] Models loaded successfully.", flush=True)
     except Exception as e:
         model_load_error = str(e)
-        print(f"[models] Falha ao carregar modelos: {e}", flush=True)
+        print(f"[models] Failed to load models: {e}", flush=True)
         feature_extractor = None
         scaler = None
         label_encoder = None
@@ -90,15 +67,9 @@ def _load_models():
 
 _load_models()
 
-EXECUTOR = ThreadPoolExecutor(max_workers=4)
-
 SLUG_DISPLAY_MAP = {
     "human_real": "Human (Real)",
     "deepfake_gan": "Deepfake (GAN)",
-    "dalle3": "DALL-E 3",
-    "midjourney": "Midjourney v6",
-    "stable_diffusion": "Stable Diffusion",
-    "gemini_imagen": "Gemini / Imagen",
 }
 
 
@@ -115,6 +86,7 @@ def _display_name_from_slug(slug: str) -> str:
     return SLUG_DISPLAY_MAP.get(slug, slug)
 
 
+# ── Routes ───────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return app.send_static_file("index.html")
@@ -133,6 +105,8 @@ def health():
             "status": "ok",
             "model_loaded": _model_is_loaded(),
             "classes": classes,
+            "sightengine_configured": se_module is not None
+            and se_module.is_configured(),
         }
     )
 
@@ -152,30 +126,25 @@ def predict():
         )
 
     if "file" not in request.files or request.files["file"].filename == "":
-        return jsonify({"error": "no file provided"}), 400
+        return jsonify({"error": "No file provided."}), 400
 
     file = request.files["file"]
 
     try:
-        # Lê bytes primeiro
+        # Read bytes first
         image_bytes = file.read()
         if not image_bytes:
-            return jsonify({"error": "empty file"}), 400
+            return jsonify({"error": "Empty file."}), 400
 
-        # Carrega com PIL a partir de BytesIO
+        # Load with PIL from BytesIO
         try:
             image = Image.open(BytesIO(image_bytes)).convert("RGB")
         except UnidentifiedImageError:
             return jsonify(
-                {"error": "Invalid image format or corrupted file"}
+                {"error": "Invalid image format or corrupted file."}
             ), 400
 
-        img_tensor = transform(image).unsqueeze(0).to(DEVICE)
-
-        # Sightengine em paralelo (se configurado)
-        se_future = None
-        if se_is_configured():
-            se_future = EXECUTOR.submit(se_check_image, image_bytes)
+        img_tensor = eval_transform(image).unsqueeze(0).to(DEVICE)
 
         with torch.no_grad():
             features = feature_extractor(img_tensor).cpu().numpy()
@@ -185,11 +154,11 @@ def predict():
         probs = mlp_model.predict_proba(features_scaled)[0]
         pred_label = mlp_model.predict(features_scaled)[0]
 
-        # Traduz índice -> slug -> display name
+        # Translate index → slug → display name
         slug = label_encoder.inverse_transform([pred_label])[0]
         display_pred = _display_name_from_slug(slug)
 
-        # Probabilidades por classe (nome legível)
+        # Probabilities per class (human-readable name)
         prob_dict = {}
         for cls_idx, p in zip(mlp_model.classes_, probs):
             slug_i = label_encoder.inverse_transform([cls_idx])[0]
@@ -206,14 +175,14 @@ def predict():
             "uncertain": uncertain,
         }
 
-        if se_future is not None:
+        # Optional: Sightengine cross-check (best-effort)
+        if se_module is not None and se_module.is_configured():
             try:
-                se_result = se_future.result(timeout=10)
+                se_result = se_module.check_image(image_bytes)
                 if se_result is not None:
                     response["sightengine"] = se_result
             except Exception:
-                # Falhas na API externa não devem quebrar a rota principal
-                pass
+                pass  # Sightengine is optional; never block predictions
 
         return jsonify(response)
 
@@ -221,7 +190,13 @@ def predict():
         return jsonify({"error": str(e)}), 500
 
 
+# ── Error handler for oversized files ────────────────────────────────
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({"error": "File too large. Maximum size is 10 MB."}), 413
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=True)
-
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(host="0.0.0.0", port=port, debug=debug)

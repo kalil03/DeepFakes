@@ -6,17 +6,25 @@ __pycache__/
 
 archive/
 
-# *.pkl (Uncommented to allow production models)
+# Production model files are tracked via Git LFS
+# Uncomment to ignore locally:
 # *.pkl
 
 .DS_Store
 Thumbs.db
-
-# huggingface/ (Temporarily allowed for model deployment)
-# huggingface/
 
 features_cache/
 
 multi_dataset/
 new_dataset/
 
+# Environment and secrets
+.env
+.env.local
+.env.production
+
+# Raw datasets (large, downloaded via scripts)
+datasets/
+
+# Vendor directory (local deploy fallback, 24 MB)
+# vendor/

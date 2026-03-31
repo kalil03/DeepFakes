@@ -1,10 +1,10 @@
 ---
-title: DeepFake & AI Image Detector
+title: DeepTrace — Face Deepfake Detector
 emoji: 🔍
-colorFrom: purple
-colorTo: blue
+colorFrom: red
+colorTo: purple
 sdk: docker
 pinned: true
-short_description: Identifies which AI generated an image with 96.65% accuracy
+short_description: Detects AI-generated and manipulated faces with 98%+ accuracy
 ---
 

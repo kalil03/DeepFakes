@@ -17,12 +17,12 @@ const AnalyzeButton = ({ onClick, isAnalyzing, disabled }: AnalyzeButtonProps) =
         {isAnalyzing ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
-            Analisando...
+            Analyzing…
           </>
         ) : (
           <>
             <Scan className="w-4 h-4" />
-            Analisar Imagem
+            Analyze Image
           </>
         )}
       </span>

@@ -1,18 +1,28 @@
+"""
+Training script: DenseNet121 feature extraction → MLP classifier.
+
+Usage:
+    python train_mlp.py
+
+    # AMD ROCm:
+    USE_ROCM=1 python train_mlp.py
+"""
+
 import os
 from pathlib import Path
 import time
+import copy
+import warnings
 from typing import List, Tuple
 
-os.environ["HSA_OVERRIDE_GFX_VERSION"] = "10.3.0"
-os.environ["ROCM_PATH"] = "/opt/rocm"
+# ROCm environment (only set when actually using AMD GPU locally)
+if os.environ.get("USE_ROCM", "0") == "1":
+    os.environ.setdefault("HSA_OVERRIDE_GFX_VERSION", "10.3.0")
+    os.environ.setdefault("ROCM_PATH", "/opt/rocm")
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
-from torchvision.models import densenet121, DenseNet121_Weights
 
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.neural_network import MLPClassifier
@@ -22,38 +32,24 @@ from sklearn.metrics import (
     confusion_matrix,
     log_loss,
 )
-import copy
+from sklearn.exceptions import ConvergenceWarning
 import matplotlib.pyplot as plt
 import seaborn as sns
 import joblib
 from tqdm.auto import tqdm
 from PIL import Image, ImageFile
 
+from model import DenseNetExtractor, train_transform, eval_transform, DEVICE
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-# ---------------------------------------------------------------------
-# Configurações gerais
-# ---------------------------------------------------------------------
+# ── Configuration ────────────────────────────────────────────────────
 BASE_DIR = Path("multi_dataset")
-IMG_SIZE = 224
 BATCH_SIZE = 64
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 RANDOM_SEED = 42
 
 
-class DenseNetExtractor(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.densenet = densenet121(weights=DenseNet121_Weights.IMAGENET1K_V1)
-        self.features = self.densenet.features
-
-    def forward(self, x):
-        f = self.features(x)
-        f = F.relu(f, inplace=True)
-        f = F.adaptive_avg_pool2d(f, (1, 1))
-        return torch.flatten(f, 1)
-
-
+# ── Dataset ──────────────────────────────────────────────────────────
 class PathsDataset(Dataset):
     def __init__(self, paths: List[Path], labels: List[int], transform=None):
         self.paths = paths
@@ -72,6 +68,7 @@ class PathsDataset(Dataset):
         return img, label
 
 
+# ── Helpers ──────────────────────────────────────────────────────────
 def build_label_encoder(slugs: List[str]) -> LabelEncoder:
     le = LabelEncoder()
     le.fit(sorted(slugs))
@@ -99,51 +96,16 @@ def collect_split(
     return paths, labels
 
 
-def get_transforms():
-    # Apenas train recebe augmentação pesada
-    train_tf = transforms.Compose(
-        [
-            transforms.Resize((IMG_SIZE, IMG_SIZE)),
-            transforms.RandomHorizontalFlip(0.5),
-            transforms.RandomRotation(15),
-            transforms.ColorJitter(
-                brightness=0.3,
-                contrast=0.3,
-                saturation=0.2,
-            ),
-            transforms.RandomApply(
-                [transforms.GaussianBlur(kernel_size=3)],
-                p=0.3,
-            ),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
-            ),
-        ]
-    )
-
-    eval_tf = transforms.Compose(
-        [
-            transforms.Resize((IMG_SIZE, IMG_SIZE)),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225],
-            ),
-        ]
-    )
-    return train_tf, eval_tf
-
-
 def extract_features(
+    extractor: DenseNetExtractor,
     paths: List[Path],
     labels: List[int],
     transform,
     split_name: str,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Extract DenseNet121 features from images using a pre-loaded extractor."""
     if not paths:
-        raise RuntimeError(f"Nenhuma imagem encontrada para o split '{split_name}'.")
+        raise RuntimeError(f"No images found for split '{split_name}'.")
 
     dataset = PathsDataset(paths, labels, transform=transform)
     loader = DataLoader(
@@ -154,75 +116,84 @@ def extract_features(
         pin_memory=(DEVICE.type == "cuda"),
     )
 
-    model = DenseNetExtractor().to(DEVICE)
-    model.eval()
-
     feats, labs = [], []
     start = time.time()
     with torch.no_grad():
-        for imgs, ys in tqdm(loader, desc=f"Extraindo features [{split_name}]"):
+        for imgs, ys in tqdm(loader, desc=f"Extracting features [{split_name}]"):
             imgs = imgs.to(DEVICE)
-            with torch.amp.autocast(
-                "cuda", enabled=(DEVICE.type == "cuda")
-            ):
-                f = model(imgs)
+            with torch.amp.autocast("cuda", enabled=(DEVICE.type == "cuda")):
+                f = extractor(imgs)
             feats.append(f.cpu().numpy())
             labs.append(ys.numpy())
-            if DEVICE.type == "cuda":
-                torch.cuda.empty_cache()
 
     X = np.vstack(feats)
     y = np.concatenate(labs)
-    print(f"  [{split_name}] done: {X.shape} em {time.time() - start:.1f}s")
+    elapsed = time.time() - start
+    print(f"  [{split_name}] done: {X.shape} in {elapsed:.1f}s")
     return X, y
 
 
+# ── Main ─────────────────────────────────────────────────────────────
 def main():
     np.random.seed(RANDOM_SEED)
     torch.manual_seed(RANDOM_SEED)
 
     if not BASE_DIR.exists():
         raise RuntimeError(
-            f"Diretório '{BASE_DIR}' não encontrado. "
-            "Certifique-se de rodar antes `python build_multi_dataset.py`."
+            f"Directory '{BASE_DIR}' not found. "
+            "Make sure to run `python build_multi_dataset.py` first."
         )
 
-    # Descobre as classes (slugs) a partir das pastas
+    # Discover classes (slugs) from directories
     slugs = sorted(d.name for d in BASE_DIR.iterdir() if d.is_dir())
     if not slugs:
-        raise RuntimeError(f"Nenhuma classe encontrada em {BASE_DIR}.")
+        raise RuntimeError(f"No classes found in {BASE_DIR}.")
 
-    print(f"device: {DEVICE}")
-    print(f"classes (slugs): {slugs}")
+    print(f"Device: {DEVICE}")
+    print(f"Classes (slugs): {slugs}")
 
     label_encoder = build_label_encoder(slugs)
 
-    # Carrega listas de paths/labels
-    print("\n[coleta] paths por split...")
+    # Collect path/label lists
+    print("\n[collect] paths per split...")
     train_paths, train_labels = collect_split("train", label_encoder)
     val_paths, val_labels = collect_split("val", label_encoder)
     test_paths, test_labels = collect_split("test", label_encoder)
 
-    print(f"  train: {len(train_paths)} imagens")
-    print(f"  val:   {len(val_paths)} imagens")
-    print(f"  test:  {len(test_paths)} imagens")
+    print(f"  train: {len(train_paths)} images")
+    print(f"  val:   {len(val_paths)} images")
+    print(f"  test:  {len(test_paths)} images")
 
-    train_tf, eval_tf = get_transforms()
+    # Create extractor ONCE (reused for all splits)
+    print("\n[features] Loading DenseNet121 extractor...")
+    extractor = DenseNetExtractor().to(DEVICE)
+    extractor.eval()
 
-    # Pré-cálculo de features
-    print("\n[features] extraindo features DenseNet121...")
-    X_train, y_train = extract_features(train_paths, train_labels, train_tf, "train")
-    X_val, y_val = extract_features(val_paths, val_labels, eval_tf, "val")
-    X_test, y_test = extract_features(test_paths, test_labels, eval_tf, "test")
+    # Feature extraction
+    print("[features] Extracting DenseNet121 features...")
+    X_train, y_train = extract_features(
+        extractor, train_paths, train_labels, train_transform, "train"
+    )
+    X_val, y_val = extract_features(
+        extractor, val_paths, val_labels, eval_transform, "val"
+    )
+    X_test, y_test = extract_features(
+        extractor, test_paths, test_labels, eval_transform, "test"
+    )
 
-    # Normalização (StandardScaler)
-    print("\n[scaler] ajustando StandardScaler com treino...")
+    # Free GPU memory after feature extraction
+    del extractor
+    if DEVICE.type == "cuda":
+        torch.cuda.empty_cache()
+
+    # StandardScaler (fit on train only)
+    print("\n[scaler] Fitting StandardScaler on train set...")
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train)
     X_val_s = scaler.transform(X_val)
     X_test_s = scaler.transform(X_test)
 
-    # Treino do MLP (scikit-learn)
+    # MLP training (scikit-learn) with manual early stopping
     mlp = MLPClassifier(
         hidden_layer_sizes=(512, 256, 128),
         activation="relu",
@@ -241,21 +212,19 @@ def main():
     no_improve = 0
     max_epochs = 500
 
-    print("\n[treino] MLP com early stopping (val log-loss)...")
-    from sklearn.exceptions import ConvergenceWarning
-    import warnings
+    print("\n[train] MLP with early stopping (val log-loss)...")
 
     t0 = time.time()
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=ConvergenceWarning)
-        epoch_iter = tqdm(range(max_epochs), desc="Treinando MLP")
+        epoch_iter = tqdm(range(max_epochs), desc="Training MLP")
         for epoch in epoch_iter:
             mlp.fit(X_train_s, y_train)
 
-            # Loss de treino (MLPClassifier expõe loss_ do último fit)
+            # Training loss (MLPClassifier exposes loss_ from last fit)
             train_loss = getattr(mlp, "loss_", np.nan)
 
-            # Métricas de validação
+            # Validation metrics
             val_probs = mlp.predict_proba(X_val_s)
             val_loss = log_loss(y_val, val_probs)
             val_pred = np.argmax(val_probs, axis=1)
@@ -285,20 +254,20 @@ def main():
 
             if no_improve >= patience:
                 print(
-                    f"\n[early stopping] parada em epoch {epoch}. "
-                    "Restaurando melhores pesos (menor val_loss)."
+                    f"\n[early stopping] Stopped at epoch {epoch}. "
+                    "Restoring best weights (lowest val_loss)."
                 )
                 mlp.coefs_ = best_weights
                 mlp.intercepts_ = best_intercepts
                 break
 
-    print(f"\n[treino] concluído em {time.time() - t0:.1f}s")
+    print(f"\n[train] Completed in {time.time() - t0:.1f}s")
 
-    # Avaliação final no conjunto de teste
-    print("\n[avaliacao] conjunto de teste...")
+    # Final evaluation on test set
+    print("\n[eval] Test set evaluation...")
     y_pred = mlp.predict(X_test_s)
     acc = accuracy_score(y_test, y_pred)
-    print(f"\nAcurácia geral (test): {acc:.4%}")
+    print(f"\nOverall accuracy (test): {acc:.4%}")
 
     class_names = list(label_encoder.classes_)
     print("\nClassification report (test):")
@@ -312,13 +281,12 @@ def main():
     )
 
     cm = confusion_matrix(y_test, y_pred)
-    # acurácia por classe = diag / total da classe
     per_class_acc = cm.diagonal() / cm.sum(axis=1).clip(min=1)
-    print("\nAcurácia por classe (test):")
+    print("\nPer-class accuracy (test):")
     for name, a in zip(class_names, per_class_acc):
         print(f"  {name:16s}: {a:.4%}")
 
-    # Matriz de confusão normalizada para visualização
+    # Normalized confusion matrix
     cm_norm = confusion_matrix(y_test, y_pred, normalize="true")
     plt.figure(figsize=(8, 6))
     sns.heatmap(
@@ -334,13 +302,12 @@ def main():
     plt.savefig("confusion_matrix.png")
     plt.close()
 
-    # Salvando artefatos
+    # Save artifacts
     joblib.dump(scaler, "scaler.pkl")
     joblib.dump(label_encoder, "label_encoder.pkl")
     joblib.dump(mlp, "model_mlp.pkl")
-    print("\n[save] Artefatos salvos: model_mlp.pkl, scaler.pkl, label_encoder.pkl")
+    print("\n[save] Artifacts saved: model_mlp.pkl, scaler.pkl, label_encoder.pkl")
 
 
 if __name__ == "__main__":
     main()
-

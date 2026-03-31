@@ -1,18 +1,18 @@
 import { ShieldCheck, ShieldAlert, RefreshCcw } from "lucide-react";
 
+export interface ClassProbability {
+  name: string;
+  emoji: string;
+  probability: number; // 0–1
+}
+
 export interface SightengineResult {
   is_deepfake: boolean;
   deepfake_score: number;
   is_ai_generated: boolean;
   ai_score: number;
-  generator_type: "diffusion" | "gan" | "other" | "none";
-  agreement?: "agree" | "disagree" | "unknown";
-}
-
-export interface ClassProbability {
-  name: string;
-  emoji: string;
-  probability: number; // 0–1
+  generator_type: string;
+  agreement?: "agree" | "disagree";
 }
 
 export interface AnalysisResult {
@@ -35,24 +35,6 @@ const ResultCard = ({ result, imagePreview, onReset }: ResultCardProps) => {
   const sortedProbs = [...result.probabilities].sort(
     (a, b) => b.probability - a.probability,
   );
-
-  const se = result.sightengine;
-  const hasSightengine = !!se;
-
-  const seBadge =
-    se && se.agreement === "agree"
-      ? {
-          label: "External verification: consistent",
-          className:
-            "text-xs font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40",
-        }
-      : se && se.agreement === "disagree"
-        ? {
-            label: "External verification: mismatch",
-            className:
-              "text-xs font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/40",
-          }
-        : null;
 
   return (
     <div className="w-full max-w-3xl mx-auto rounded-xl border border-[#1f1f1f] bg-[#050505] overflow-hidden animate-in fade-in duration-200">
@@ -112,7 +94,7 @@ const ResultCard = ({ result, imagePreview, onReset }: ResultCardProps) => {
               </div>
               <div>
                 <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-0.5">
-                  Predicted Source
+                  Predicted verdict
                 </p>
                 <h3 className="text-xl font-bold flex items-center gap-2">
                   <span className="text-lg">
@@ -120,6 +102,11 @@ const ResultCard = ({ result, imagePreview, onReset }: ResultCardProps) => {
                   </span>
                   <span>{result.predictedClass}</span>
                 </h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {isReal
+                    ? "No manipulation detected."
+                    : "AI generation or manipulation detected."}
+                </p>
               </div>
             </div>
           </div>
@@ -163,7 +150,7 @@ const ResultCard = ({ result, imagePreview, onReset }: ResultCardProps) => {
       {/* Class probability breakdown */}
       <div className="px-6 py-5 space-y-4 bg-background">
         <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest">
-          Confidence by generator
+          Confidence by class
         </p>
         <div className="space-y-3">
           {sortedProbs.map((item, idx) => {
@@ -208,57 +195,29 @@ const ResultCard = ({ result, imagePreview, onReset }: ResultCardProps) => {
         </div>
       </div>
 
-      {/* Sightengine section */}
-      {hasSightengine && se && (
-        <div className="px-6 py-4 border-t border-[#1f1f1f] bg-[#050505]">
-          <div className="flex items-center justify-between mb-2">
-            <div>
-              <p className="text-xs font-mono text-muted-foreground uppercase tracking-[0.25em]">
-                External Verification
-              </p>
-              <p className="text-[11px] text-muted-foreground/80">
-                Scores reported by Sightengine (independent model).
-              </p>
-            </div>
-            {seBadge && (
-              <span className={seBadge.className}>{seBadge.label}</span>
-            )}
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
-            <div className="rounded-lg bg-slate-900/70 border border-white/5 px-3 py-2">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide mb-0.5">
-                Deepfake score
-              </p>
-              <p className="text-sm font-mono text-foreground">
-                {(se.deepfake_score * 100).toFixed(1)}%
-              </p>
-            </div>
-            <div className="rounded-lg bg-slate-900/70 border border-white/5 px-3 py-2">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide mb-0.5">
-                AI score
-              </p>
-              <p className="text-sm font-mono text-foreground">
-                {(se.ai_score * 100).toFixed(1)}%
-              </p>
-            </div>
-            <div className="rounded-lg bg-slate-900/70 border border-white/5 px-3 py-2">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide mb-0.5">
-                Generator type
-              </p>
-              <p className="text-sm font-mono text-foreground capitalize">
-                {se.generator_type === "none"
-                  ? "none"
-                  : se.generator_type || "unknown"}
-              </p>
-            </div>
-            <div className="rounded-lg bg-slate-900/70 border border-white/5 px-3 py-2">
-              <p className="text-[10px] font-mono text-muted-foreground uppercase tracking-wide mb-0.5">
-                External verdict
-              </p>
-              <p className="text-sm font-mono text-foreground">
-                {se.is_ai_generated || se.is_deepfake ? "AI / deepfake" : "Human"}
-              </p>
-            </div>
+      {/* Sightengine cross-validation (if available) */}
+      {result.sightengine && (
+        <div className="px-6 py-4 border-t border-[#1f1f1f] bg-background">
+          <p className="text-xs font-mono text-muted-foreground uppercase tracking-widest mb-3">
+            Sightengine Cross-Check
+          </p>
+          <div className="flex items-center gap-3 text-xs">
+            <span
+              className={`px-2 py-1 rounded font-medium ${
+                result.sightengine.agreement === "agree"
+                  ? "bg-emerald-500/15 text-emerald-400"
+                  : "bg-amber-500/15 text-amber-400"
+              }`}
+            >
+              {result.sightengine.agreement === "agree"
+                ? "✓ Models agree"
+                : "⚠ Models disagree"}
+            </span>
+            <span className="text-muted-foreground">
+              AI score: {(result.sightengine.ai_score * 100).toFixed(0)}% •
+              Deepfake score:{" "}
+              {(result.sightengine.deepfake_score * 100).toFixed(0)}%
+            </span>
           </div>
         </div>
       )}

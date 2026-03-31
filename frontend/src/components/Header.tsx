@@ -10,7 +10,7 @@ const Header = () => {
         <div className="leading-tight">
           <h1 className="text-sm font-semibold text-foreground">DeepTrace</h1>
           <p className="text-[11px] text-muted-foreground">
-            Deepfake &amp; AI image attribution
+            Forensic deepfake detection for human faces
           </p>
         </div>
       </div>

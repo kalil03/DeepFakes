@@ -15,25 +15,43 @@ const Index = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
-  const handleImageSelect = useCallback((file: File) => {
-    setImage(file);
-    setImagePreview(URL.createObjectURL(file));
-    setResult(null);
-  }, []);
+  const { toast } = useToast();
+
+  const handleImageSelect = useCallback(
+    (file: File) => {
+      // Validate file size (10 MB max, matching backend limit)
+      if (file.size > 10 * 1024 * 1024) {
+        toast({
+          title: "File too large",
+          description: "Maximum file size is 10 MB.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Revoke previous URL to prevent memory leak
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+
+      setImage(file);
+      setImagePreview(URL.createObjectURL(file));
+      setResult(null);
+    },
+    [imagePreview, toast],
+  );
 
   const handleImageRemove = useCallback(() => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
     setImage(null);
     setImagePreview(null);
     setResult(null);
-  }, []);
+  }, [imagePreview]);
 
   const handleReset = useCallback(() => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
     setImage(null);
     setImagePreview(null);
     setResult(null);
-  }, []);
-
-  const { toast } = useToast();
+  }, [imagePreview]);
 
   const handleAnalyze = useCallback(async () => {
     if (!image) return;
@@ -80,10 +98,6 @@ const Index = () => {
       const emojiMap: Record<string, string> = {
         "Human (Real)": "👤",
         "Deepfake (GAN)": "🤖",
-        "DALL-E 3": "🎨",
-        "Midjourney v6": "🌌",
-        "Stable Diffusion": "🖌️",
-        "Gemini / Imagen": "✨",
       };
 
       const classProbs: ClassProbability[] = Object.entries(probabilities).map(
@@ -130,14 +144,14 @@ const Index = () => {
     <div className="min-h-screen flex flex-col bg-background">
       <Header />
 
-      <main className="flex-1 flex flex-col items-center justify-center px-4 py-10 gap-8">
+      <main className="flex-1 flex flex-col items-center justify-center px-4 py-10 gap-6">
         <div className="w-full max-w-xl text-left mb-2">
           <h2 className="text-2xl sm:text-3xl font-semibold tracking-tight text-foreground mb-1">
-            Deepfake attribution analysis
+            Is this face real?
           </h2>
           <p className="text-xs sm:text-sm text-muted-foreground max-w-xl">
-            Upload a face or AI-generated image to estimate whether it is human
-            or synthetic and which generator model best matches its signature.
+            Upload a portrait or face photo to detect if it was generated or
+            manipulated by AI.
           </p>
         </div>
 
@@ -148,6 +162,10 @@ const Index = () => {
           onImageRemove={handleImageRemove}
           isAnalyzing={isAnalyzing}
         />
+
+        <p className="text-[11px] text-muted-foreground max-w-xl text-left">
+          ⚠️ Optimized for face/portrait images only.
+        </p>
 
         <AnalyzeButton
           onClick={handleAnalyze}
@@ -166,7 +184,7 @@ const Index = () => {
 
       <footer className="py-4 text-center">
         <p className="text-xs font-mono text-muted-foreground">
-          Veritas AI — Análise Forense Digital &amp; AI Attribution
+          DeepTrace — Forensic deepfake detection for human faces
         </p>
       </footer>
     </div>
